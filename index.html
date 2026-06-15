@@ -212,6 +212,7 @@ main{max-width:760px;margin:0 auto;padding:26px 22px 80px}
 .paq-actions{display:flex;gap:8px;flex-shrink:0}
 .pago-pendiente{font-size:11px;font-weight:600;letter-spacing:.3px;color:var(--red);display:inline-flex;align-items:center}
 .pago-aviso{font-size:11px;color:var(--accent);font-weight:500}
+.pago-ok{font-size:11px;font-weight:600;letter-spacing:.3px;color:var(--green)}
 .paq-card.locked{border-color:#E6C4BE;background:#FCF6F4}
 .btn{
   border-radius:var(--r);font-size:11px;letter-spacing:.5px;font-weight:500;
@@ -675,7 +676,7 @@ function cardHtml(p){
       ? '<span class="pago-pendiente">⚠ Pago pendiente'+saldoTxt+'</span>'
       : (pendientePago && saldoTxt
           ? '<span class="pago-aviso">Pago pendiente'+saldoTxt+'</span>'
-          : '<span class="paq-last">'+(p.ultimaSesion?'<em>Última</em>'+escapeHtml(p.ultimaSesion):'<em>Sin sesiones aún</em>')+'</span>');
+          : '<span class="paq-last">'+(p.estadoPago==='Pagado'?'<span class="pago-ok">✓ Pagado</span> ':'')+(p.ultimaSesion?'<em>Última</em>'+escapeHtml(p.ultimaSesion):'<em>Sin sesiones aún</em>')+'</span>');
     foot=lastTxt+
       '<span class="paq-actions">'+btnReg+
       '<button class="btn btn-ghost" onclick="openHist(\''+p.paqueteId+'\')">Historial</button>'+

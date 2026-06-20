@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- PAQUETES · v2026-06-20 · + Redención de Paquetes Prepagados -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -309,6 +310,14 @@ main{max-width:760px;margin:0 auto;padding:26px 22px 80px}
 @media (prefers-reduced-motion:reduce){
   *{animation:none!important;transition:none!important}
 }
+/* Paquetes prepagados — filas de ítems */
+.pre-items{display:flex;flex-direction:column;margin-top:8px}
+.pre-item{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:11px 0;border-top:1px solid var(--border)}
+.pre-item:first-child{border-top:none}
+.pre-item-name{font-size:13.5px;font-weight:500;color:var(--ink,#2b2622)}
+.pre-item-count{font-size:11px;color:var(--mid);margin-top:3px;letter-spacing:.2px}
+.pre-item-count b{font-size:14px;color:var(--stone,#6B6059)}
+.pre-item-act{flex:0 0 auto}
 </style>
 </head>
 <body>
@@ -433,6 +442,8 @@ let SESSION = null;
 let CACHE   = [];   // último resultado de búsqueda
 let GATE_ACTIVO = false;   // si el candado de pago está activo en el gateway
 let activePaq = null;
+let CACHE_PRE = [];     // último resultado de prepagados
+let activePre = null;   // {paqueteId,itemId,...} en redención
 
 /* ══════════════════════════════════════════════════════
    AUTH
@@ -595,6 +606,13 @@ async function runSearch(nombre){
     if(!j.ok)throw new Error(j.error||'Error desconocido.');
     CACHE=j.paquetes||[];
     GATE_ACTIVO=!!j.gateActivo;
+    // Buscar también paquetes prepagados (try propio: si falla, NO rompe FZ)
+    try{
+      const urlP=COBROS_GATEWAY_URL+'?action=buscarPrepagados&paciente='+encodeURIComponent(q);
+      const rP=await fetch(urlP,{redirect:'follow'});
+      const jP=JSON.parse(await rP.text());
+      CACHE_PRE=(jP&&jP.ok&&jP.prepagados)?jP.prepagados:[];
+    }catch(ePre){ CACHE_PRE=[]; console.warn('[Prepagado] No se pudieron cargar:',ePre); }
     renderResults(q);
   }catch(err){
     setHint('');
@@ -616,8 +634,10 @@ function showState(kind,title,text){
 }
 
 function renderResults(q){
-  setHint(CACHE.length+' '+(CACHE.length===1?'paquete encontrado':'paquetes encontrados'));
-  if(!CACHE.length){
+  const _nPre=(typeof CACHE_PRE!=='undefined'?CACHE_PRE.length:0);
+  const _tot=CACHE.length+_nPre;
+  setHint(_tot+' '+(_tot===1?'paquete encontrado':'paquetes encontrados'));
+  if(!CACHE.length && !_nPre){
     showState('empty','Sin paquetes','No hay paquetes registrados para "'+escapeHtml(q)+'". Verifica el nombre o que la cotización se haya marcado como aceptada.');
     return;
   }
@@ -646,7 +666,87 @@ function renderResults(q){
     g.items.forEach(function(p){html+=cardHtml(p);});
     html+='</div>';
   });
+  html += _prepaSectionHtml();
   document.getElementById('results').innerHTML=html;
+}
+
+/* ══ PREPAGADOS — redención de paquetes multi-ítem ══ */
+function _prepaSectionHtml(){
+  if(!CACHE_PRE.length) return '';
+  let h='<div class="pat-group"><div class="pat-head">'+
+    '<div class="pat-name">Paquetes prepagados</div>'+
+    '<div class="pat-meta">Pagados por adelantado · se redimen por separado</div></div>';
+  CACHE_PRE.forEach(function(pre){ h+=prepaCardHtml(pre); });
+  h+='</div>';
+  return h;
+}
+
+function prepaCardHtml(pre){
+  const items=pre.items||[];
+  const completo=pre.estado==='Completado';
+  let rows='';
+  items.forEach(function(it){
+    const disp=(it.disponibles!=null)?it.disponibles:((it.cantidad||0)-(it.consumidas||0));
+    const tot=it.cantidad||0;
+    const agotado=disp<=0||it.estado==='Completado';
+    const btn=agotado
+      ? '<span class="done-badge">✓ Agotado</span>'
+      : '<button class="btn btn-primary" onclick="openRedimir(\''+escapeHtml(pre.paqueteId)+'\','+it.itemId+')">Redimir 1</button>';
+    rows+='<div class="pre-item">'+
+      '<div class="pre-item-info"><div class="pre-item-name">'+escapeHtml(it.tratamiento)+'</div>'+
+      '<div class="pre-item-count"><b>'+disp+'</b> de '+tot+' disponibles</div></div>'+
+      '<div class="pre-item-act">'+btn+'</div></div>';
+  });
+  return '<div class="paq-card'+(completo?' done':'')+'">'+
+    '<div class="paq-top"><div><div class="paq-name">Paquete prepagado</div>'+
+    '<div class="paq-id">'+escapeHtml(pre.paqueteId)+(pre.cotizacionId?' · '+escapeHtml(pre.cotizacionId):'')+'</div></div>'+
+    (completo?'<span class="done-badge">✓ Completado</span>':'')+'</div>'+
+    '<div class="pre-items">'+rows+'</div></div>';
+}
+
+function findPre(paqueteId){return CACHE_PRE.find(function(p){return p.paqueteId===paqueteId;});}
+
+function openRedimir(paqueteId,itemId){
+  const pre=findPre(paqueteId);if(!pre)return;
+  const it=(pre.items||[]).find(function(x){return x.itemId===itemId;});if(!it)return;
+  const disp=(it.disponibles!=null)?it.disponibles:((it.cantidad||0)-(it.consumidas||0));
+  if(disp<=0){toast('Ese tratamiento ya está agotado.','error');return;}
+  activePre={paqueteId:paqueteId,itemId:itemId,tratamiento:it.tratamiento,pacienteNombre:pre.pacienteNombre,disponibles:disp,total:it.cantidad||0};
+  activePaq=null;
+  document.getElementById('confirm-q').textContent='¿Redimir 1 de "'+it.tratamiento+'"? Quedan '+disp+' disponible(s).';
+  document.getElementById('confirm-sub').innerHTML='<b>'+escapeHtml(it.tratamiento)+'</b><br>'+escapeHtml(pre.pacienteNombre)+' · '+escapeHtml(paqueteId);
+  document.getElementById('confirm-notes').value='';
+  document.getElementById('confirm-go').onclick=doRedimir;
+  const bg=document.getElementById('confirm-bg');bg.classList.add('on');
+  setTimeout(function(){document.getElementById('confirm-notes').focus();},60);
+}
+
+async function doRedimir(){
+  if(!activePre)return;
+  const a=activePre;
+  const notas=document.getElementById('confirm-notes').value.trim();
+  const btn=document.getElementById('confirm-go');
+  btn.disabled=true;btn.textContent='Redimiendo…';
+  try{
+    const payload={action:'redimirItem',paqueteId:a.paqueteId,itemId:a.itemId,registradoPor:SESSION?SESSION.email:'',notas:notas};
+    const r=await fetch(COBROS_GATEWAY_URL,{method:'POST',body:JSON.stringify(payload),redirect:'follow'});
+    const txt=await r.text();
+    let j;try{j=JSON.parse(txt);}catch(e){throw new Error('Respuesta no válida del servidor.');}
+    if(!j.ok)throw new Error(j.error||'Error desconocido.');
+    const pre=findPre(a.paqueteId);
+    if(pre){
+      const it=(pre.items||[]).find(function(x){return x.itemId===a.itemId;});
+      if(it){it.consumidas=j.consumidas;it.disponibles=Math.max(0,(j.total||it.cantidad)-j.consumidas);if(j.itemCompletado)it.estado='Completado';}
+      if(j.paqueteCompletado)pre.estado='Completado';
+    }
+    closeConfirm();
+    renderResults(document.getElementById('search').value.trim());
+    toast(j.itemCompletado?'✓ Redención registrada · tratamiento agotado':'✓ Redención registrada · quedan '+Math.max(0,(j.total||0)-j.consumidas),'success');
+  }catch(err){
+    toast('No se pudo redimir: '+err.message,'error');
+  }finally{
+    btn.disabled=false;btn.textContent='Confirmar';
+  }
 }
 
 function cardHtml(p){
@@ -702,10 +802,11 @@ function openConfirm(id){
   document.getElementById('confirm-q').textContent='¿Registrar sesión '+next+' de '+p.totalSesiones+'?';
   document.getElementById('confirm-sub').innerHTML='<b>'+escapeHtml(p.tratamiento)+'</b><br>'+escapeHtml(p.pacienteNombre);
   document.getElementById('confirm-notes').value='';
+  document.getElementById('confirm-go').onclick=doRegistrar;
   const bg=document.getElementById('confirm-bg');bg.classList.add('on');
   setTimeout(function(){document.getElementById('confirm-notes').focus();},60);
 }
-function closeConfirm(){document.getElementById('confirm-bg').classList.remove('on');activePaq=null;}
+function closeConfirm(){document.getElementById('confirm-bg').classList.remove('on');activePaq=null;activePre=null;}
 
 async function doRegistrar(){
   if(!activePaq)return;
